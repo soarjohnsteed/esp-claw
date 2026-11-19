@@ -45,7 +45,7 @@ Waveshare-ESP32-S3-Touch-LCD-3.5B/
 
 A total of 11 files. Their original relative paths are preserved.
 
-### Quick Start
+## Quick Start
 
 Flash the `edge_agent_full_16MB.bin` file located in the repository root directory.
 
@@ -257,7 +257,7 @@ Waveshare-ESP32-S3-Touch-LCD-3.5B/
 
 共 11 个文件，保留原始相对路径。
 
-### 直接使用
+## 直接使用
 
 烧录仓库根目录下的 `edge_agent_full_16MB.bin`。
 
