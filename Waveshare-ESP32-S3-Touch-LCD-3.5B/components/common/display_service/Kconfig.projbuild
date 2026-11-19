@@ -1,0 +1,57 @@
+menu "Display Service"
+
+    config DISPLAY_SERVICE_FORCE_FULL_REFRESH
+        bool "Force full-frame refresh (for panels without row addressing)"
+        default n
+        help
+            Switch the LVGL display to LV_DISPLAY_RENDER_MODE_FULL after it has
+            been registered with esp_lv_adapter, so LVGL invalidates and flushes
+            the whole screen every frame instead of dirty rectangles.
+
+            Required for display controllers whose driver cannot set a row
+            address window, e.g. AXS15231B in QSPI mode. That driver skips the
+            RASET (0x2B) command and streams pixels with RAMWR (0x2C) followed
+            by RAMWRC (0x3C) continuations, which is only correct for
+            contiguous bands starting at row 0. Under PARTIAL refresh the first
+            frame (a full-screen invalidate) looks right and every subsequent
+            partial update corrupts the image.
+
+            The render mode cannot be requested through the adapter config:
+            display_manager_pick_render_mode() keys off tear_avoid_mode, and
+            display_manager_validate_tearing_mode() rejects every full-frame
+            tear mode on PANEL_IF_OTHER (SPI/I2C). So this option allocates two
+            full-frame draw buffers in PSRAM and installs them with
+            lv_display_set_buffers() once registration has succeeded.
+
+            Costs two full frames of PSRAM and makes every frame a full-screen
+            transfer, so expect a lower frame rate.
+
+    config DISPLAY_SERVICE_SKIP_PANEL_DISPON_DIRECT
+        bool "Do NOT send DISPON (0x29) directly to the panel IO"
+        default n
+        help
+            Display service normally pushes DISPON (0x29) straight to the panel
+            IO handle after the board manager hands over the panel. Set this
+            option to fall back to esp_lcd_panel_disp_on_off(panel, true).
+
+            Some panel drivers register an inverted disp_on_off() callback.
+            esp_lcd_panel_disp_on_off(panel, on_off) forwards on_off straight to
+            panel->disp_on_off(), but the AXS15231B driver declares its handler
+            as disp_off(panel, bool off) and maps off==true to DISPOFF (0x28).
+            The mapping is inverted relative to the framework contract, so
+            asking to turn the display ON actually sends 0x28 and the panel
+            blanks - while the backlight stays lit.
+
+            Every known-good AXS15231B integration works around this by passing
+            false (Waveshare esp_bsp bsp_display.c, the hello_35b bring-up and
+            xiaozhi-esp32 custom_lcd_display.cc all do it), which through the
+            inversion emits the intended 0x29. Relying on that is fragile, so
+            display service builds the 32-bit QSPI command itself and pushes
+            DISPON (0x29) through esp_lcd_panel_io_tx_param() instead.
+
+            The direct write is enabled by default because DISPON is idempotent:
+            on a correctly implemented driver it merely duplicates the DISPON
+            already sent during panel init. Only set this symbol if a specific
+            panel misbehaves with the extra command.
+
+endmenu

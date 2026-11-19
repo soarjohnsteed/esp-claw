@@ -1,0 +1,99 @@
+version: 1.0.0
+peripherals:
+  # ------------------------------------------------------------------
+  # I2C0 - shared by AXS15231B touch (0x3B), TCA9554 expander (0x20),
+  #        ES8311 codec (0x30), PCF85063 RTC (0x51), QMI8658 IMU (0x6B)
+  # ------------------------------------------------------------------
+  - name: i2c_master
+    type: i2c
+    role: master
+    config:
+      port: 0
+      pins:
+        sda: 8                            # GPIO8 - I2C SDA
+        scl: 7                            # GPIO7 - I2C SCL
+
+  # ------------------------------------------------------------------
+  # I2S0 - ES8311 codec
+  # ------------------------------------------------------------------
+  - name: i2s_audio_out
+    type: i2s
+    role: master
+    format: std-out                       # speaker path
+    config: &i2s_config
+      port: 0
+      sample_rate_hz: 24000
+      mclk_multiple: 256
+      # Slot configuration
+      data_bit_width: 16
+      slot_bit_width: I2S_SLOT_BIT_WIDTH_AUTO
+      slot_mode: I2S_SLOT_MODE_MONO
+      slot_mask: I2S_STD_SLOT_BOTH
+      ws_width: 16
+      # GPIO configuration
+      pins:
+        mclk: 44                          # GPIO44 - I2S MCLK
+        bclk: 13                          # GPIO13 - I2S BCLK
+        ws: 15                            # GPIO15 - I2S LRCK
+        dout: 16                          # GPIO16 - I2S DOUT (playback)
+        din: 14                           # GPIO14 - I2S DIN  (record)
+
+  - name: i2s_audio_in
+    type: i2s
+    role: master
+    format: std-in                        # microphone path
+    config: *i2s_config
+
+  # ------------------------------------------------------------------
+  # QSPI bus for the AXS15231B panel
+  #
+  # max_transfer_sz caps one SPI transaction, and therefore the frame is
+  # streamed to the panel in that many horizontal bands.
+  #
+  # It also sets the size of the internal DRAM bounce buffer spi_master
+  # allocates per in-flight transaction when the frame buffer lives in PSRAM
+  # (spi_master.c: setup_dma_priv_buffer()). Internal DRAM on the S3 is only
+  # ~291 KB and is shared with Wi-Fi, LWIP and LVGL, so a chunk that is too
+  # large makes the whole flush fail with ESP_ERR_NO_MEM -> black screen.
+  # The failing build used 12800 (320 * 20 * 2) and could not allocate even
+  # one bounce buffer at first flush; 3200 (320 * 5 * 2) keeps the worst
+  # case at 3.2 KB, which survives heavy fragmentation.
+  #
+  # Raise this only together with io_spi_config.flags.psram_dma_direct (which
+  # removes the bounce buffer entirely) - see board_devices.yaml.
+  # ------------------------------------------------------------------
+  - name: spi_display
+    type: spi
+    role: master
+    config:
+      spi_bus_config:
+        spi_port: SPI2_HOST
+        sclk_io_num: 5                    # GPIO5  - QSPI CLK
+        data0_io_num: 1                   # GPIO1  - QSPI D0
+        data1_io_num: 2                   # GPIO2  - QSPI D1
+        data2_io_num: 3                   # GPIO3  - QSPI D2
+        data3_io_num: 4                   # GPIO4  - QSPI D3
+        max_transfer_sz: 3200             # 320 * 5 * 2 bytes
+
+  # ------------------------------------------------------------------
+  # Backlight PWM
+  # ------------------------------------------------------------------
+  - name: ledc_backlight
+    type: ledc
+    role: none
+    config:
+      gpio_num: 6                         # GPIO6 - LCD backlight (active high)
+      freq_hz: 5000
+      duty: 100                           # initial duty in percent
+      duty_resolution: LEDC_TIMER_10_BIT
+
+  # ------------------------------------------------------------------
+  # BOOT button (side key)
+  # ------------------------------------------------------------------
+  - name: gpio_boot_button
+    type: gpio
+    role: io
+    config:
+      pin: 0                              # GPIO0 - BOOT
+      mode: GPIO_MODE_INPUT
+      pull_up: true

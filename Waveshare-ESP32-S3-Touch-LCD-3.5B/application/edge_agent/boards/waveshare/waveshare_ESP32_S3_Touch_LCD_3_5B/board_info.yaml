@@ -1,0 +1,4 @@
+board: waveshare_ESP32_S3_Touch_LCD_3_5B
+chip: esp32s3
+description: "Waveshare ESP32-S3-Touch-LCD-3.5B (AXS15231B QSPI 320x480 LCD + capacitive touch)"
+manufacturer: "WAVESHARE"

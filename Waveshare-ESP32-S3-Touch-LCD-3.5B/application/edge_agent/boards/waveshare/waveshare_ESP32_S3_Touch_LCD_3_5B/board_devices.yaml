@@ -1,0 +1,212 @@
+version: 1.0.0
+devices:
+  # ------------------------------------------------------------------
+  # TCA9554 I/O expander - drives LCD_RST (P0) and TP_RST (P1).
+  #
+  # MUST be declared BEFORE display_lcd: the board manager initialises
+  # devices in declaration order, and the panel stays in reset until the
+  # expander releases both lines (see io_expander_factory_entry_t).
+  # ------------------------------------------------------------------
+  - name: lcd_tp_reset
+    chip: tca9554
+    type: gpio_expander
+    version: default
+    dependencies:
+      espressif/esp_io_expander_tca9554: "*"
+    config:
+      max_pins: 8
+      # P0 = LCD_RST, P1 = TP_RST, both active low on this board.
+      output_io_mask: [0, 1]
+      output_io_level_mask: [1, 1]
+      input_io_mask: NULL
+    peripherals:
+      - name: i2c_master
+        # Board Manager expects 8-bit (left-shifted) I2C addresses here;
+        # it shifts right by one before talking to the bus.
+        # TCA9554 7-bit 0x20 -> 8-bit 0x40
+        i2c_addr: [0x40]
+
+  # ------------------------------------------------------------------
+  # Backlight
+  # ------------------------------------------------------------------
+  - name: lcd_brightness
+    type: ledc_ctrl
+    version: default
+    config:
+      default_percent: 100                # 0-100
+    peripherals:
+      - name: ledc_backlight
+
+  # ------------------------------------------------------------------
+  # Audio - ES8311 codec (single chip serving both playback and capture)
+  # ------------------------------------------------------------------
+  - name: audio_dac
+    chip: es8311
+    type: audio_codec
+    version: default
+    config:
+      adc_enabled: false
+      dac_enabled: true
+      dac_max_channel: 1
+      dac_channel_mask: "1"                # right channel
+      dac_init_gain: 0
+      mclk_enabled: true                   # GPIO44 feeds MCLK
+    peripherals:
+      - name: i2s_audio_out
+      - name: i2c_master
+        address: 0x30
+        frequency: 400000
+
+  - name: audio_adc
+    chip: es8311
+    type: audio_codec
+    version: default
+    config:
+      adc_enabled: true
+      adc_max_channel: 2                   # ADCL + DACR echo
+      adc_channel_mask: "11"
+      adc_init_gain: 0
+      mclk_enabled: true
+    peripherals:
+      - name: i2s_audio_in
+      - name: i2c_master
+        address: 0x30
+        frequency: 400000
+
+  # ------------------------------------------------------------------
+  # microSD - SDMMC 1-bit slot
+  #
+  # NOTE: SDMMC (9/10/11) and the QSPI panel (1-5/12) use different
+  # peripherals, so there is no bus conflict on this board.
+  # ------------------------------------------------------------------
+  - name: fs_sdcard
+    type: fs_fat
+    sub_type: sdmmc
+    version: default
+    config:
+      vfs_config:
+        format_if_mount_failed: false
+        max_files: 5
+      sub_config:
+        bus_width: 1
+        slot_flags: "SDMMC_SLOT_FLAG_INTERNAL_PULLUP"
+        pins:
+          clk: 11                          # GPIO11 - SD CLK
+          cmd: 10                          # GPIO10 - SD CMD
+          d0: 9                            # GPIO9  - SD D0
+
+  # ------------------------------------------------------------------
+  # LCD panel - AXS15231B over QSPI
+  #
+  # Native panel geometry is 320x480 portrait. Hardware rotation is NOT
+  # available on AXS15231B (MADCTL MV is ignored, swap_xy blanks the
+  # screen), so mirror_x / mirror_y / swap_xy must stay false and the
+  # logical resolution is the native one.
+  # ------------------------------------------------------------------
+  - name: display_lcd
+    chip: axs15231b
+    type: display_lcd
+    sub_type: spi
+    version: default
+    dependencies:
+      espressif/esp_lcd_axs15231b: "*"
+    config:
+      x_max: 320
+      y_max: 480
+      mirror_x: false
+      mirror_y: false
+      need_reset: false                    # reset lives on the TCA9554
+      # esp_lcd_panel_io_spi_config_t
+      # Mirrors AXS15231B_PANEL_IO_QSPI_CONFIG() from the panel component.
+      io_spi_config:
+        cs_gpio_num: 12                    # GPIO12 - LCD CS
+        dc_gpio_num: -1                    # QSPI carries the command in the opcode, no D/C line
+        spi_mode: 3                        # AXS15231B QSPI requires mode 3
+        pclk_hz: 40000000
+        # MUST stay 1. esp_lcd's chunked tx_color() keeps up to
+        # trans_queue_depth transactions in flight, and every one of them
+        # needs its own internal DMA bounce buffer when the frame buffer
+        # lives in PSRAM (spi_master.c: setup_dma_priv_buffer()). Internal
+        # DRAM is ~291 KB and shared with Wi-Fi/LWIP/LVGL, so peak internal
+        # use is trans_queue_depth * spi_bus_config.max_transfer_sz.
+        # 1 * 3200 B is safe; the original 10 * 12800 B = 128 KB died with
+        # ESP_ERR_NO_MEM half way down the frame.
+        trans_queue_depth: 1
+        lcd_cmd_bits: 32
+        lcd_param_bits: 8
+        flags:
+          quad_mode: true
+          # NOTE: do NOT set psram_dma_direct here. It is an IDF 6.1+ feature
+          # (esp_lcd_panel_io_spi_config_t::flags.psram_dma_direct). On IDF
+          # v5.5.x the board manager gates it behind (6,1,0) and DROPS it, but
+          # if a patched board manager force-emits `.psram_dma_direct = true`
+          # the generated code fails to compile (the flags struct member is
+          # absent in v5.5.x esp_lcd_io_spi.h) AND the flashed firmware crashes
+          # in LCD init -> boot-loop / CDC disconnect. Leaving it at the
+          # default (false) is correct and stable on v5.5.x; the small
+          # max_transfer_sz means only one memcpy per 3200 B chunk.
+          psram_dma_direct: false
+      # esp_lcd_panel_dev_config_t
+      lcd_panel_config:
+        reset_gpio_num: -1                 # reset is on the expander
+        rgb_ele_order: LCD_RGB_ELEMENT_ORDER_RGB
+        bits_per_pixel: 16
+        # The AXS15231B driver performs no byte-order conversion and the panel
+        # parses pixel data big-endian. do NOT compensate by switching LVGL to
+        # LV_COLOR_FORMAT_RGB565_SWAPPED: esp_lv_adapter already calls
+        # lv_draw_sw_rgb565_swap() for PANEL_IF_OTHER panels, but only when the
+        # colour format is exactly RGB565 - forcing RGB565_SWAPPED bypasses it
+        # and yields swapped bytes. Leave the format alone; see README pitfall 4.
+        data_endian: LCD_RGB_DATA_ENDIAN_BIG
+        vendor_config: NULL                # filled in by lcd_panel_factory_entry_t
+    peripherals:
+      - name: spi_display
+
+  # ------------------------------------------------------------------
+  # Touch - AXS15231B integrated controller on I2C
+  #
+  # The panel is used in its native portrait orientation, so no
+  # swap/mirror flags are applied here. If the panel orientation is ever
+  # changed, these flags must be updated together with it.
+  # ------------------------------------------------------------------
+  - name: lcd_touch
+    chip: axs15231b
+    type: lcd_touch
+    sub_type: i2c
+    version: default
+    dependencies:
+      espressif/esp_lcd_axs15231b: "*"
+    config:
+      io_i2c_config:
+        # No dev_addr here on purpose: the schema does not accept it
+        # (dev_lcd_touch.py hardcodes it to 0) and it would be overwritten
+        # anyway. dev_lcd_touch_sub_i2c.c probes every address in
+        # peripherals[].i2c_addr below and sets
+        # io_i2c_config.dev_addr = i2c_addr >> 1 on the first one that ACKs,
+        # so the real address comes from there.
+        scl_speed_hz: 400000
+      touch_config:
+        x_max: 320
+        y_max: 480
+        rst_gpio_num: -1
+        int_gpio_num: -1
+        flags:
+          swap_xy: false
+          mirror_x: false
+          mirror_y: false
+    peripherals:
+      - name: i2c_master
+        # 8-bit (left-shifted) form: AXS15231B 7-bit 0x3B -> 8-bit 0x76
+        i2c_addr: [0x76]
+
+  # ------------------------------------------------------------------
+  # BOOT side button
+  # ------------------------------------------------------------------
+  - name: boot_button
+    type: button
+    sub_type: gpio
+    version: default
+    config:
+      active_level: 0                      # BOOT is pulled up, active low
+    peripherals:
+      - name: gpio_boot_button

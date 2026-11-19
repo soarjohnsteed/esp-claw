@@ -1,0 +1,67 @@
+# Waveshare ESP32-S3-Touch-LCD-3.5B
+# ESP32-S3R8 (8 MB OPI PSRAM) + W25Q128 (16 MB flash)
+
+# Flash: 16 MB QIO @ 80 MHz
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16MB.csv"
+
+# PSRAM: 8 MB OPI @ 80 MHz
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# GPIO43/44 are the default UART0 console pins, but GPIO44 is wired to the
+# ES8311 MCLK on this board. Move the console to USB Serial/JTAG.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# ---------------------------------------------------------------------------
+# AXS15231B workarounds
+# ---------------------------------------------------------------------------
+# The panel driver skips RASET (0x2B) in QSPI mode: it streams with RAMWR (0x2C)
+# then RAMWRC (0x3C) continuations, which is only correct for contiguous bands
+# starting at row 0. Under LVGL's default PARTIAL refresh only the very first
+# frame is correct and later partial updates corrupt the image.
+# This switches LVGL to FULL render mode (two full-frame PSRAM draw buffers).
+# Do NOT "optimise" this away -- the symptom is a correct image for a moment
+# followed by a torn or black screen.
+CONFIG_DISPLAY_SERVICE_FORCE_FULL_REFRESH=y
+
+# The AXS15231B driver registers panel_axs15231b_disp_off(panel, bool off) as
+# the disp_on_off callback. IDF forwards on_off verbatim, so the handler's
+# "off == true -> DISPOFF (0x28)" mapping is inverted: asking to turn the
+# display on actually blanks it. esp_board_manager issues
+# esp_lcd_panel_disp_on_off(panel, true) at the end of dev_display_lcd init,
+# which therefore leaves the panel in DISPOFF - the image shows for about a
+# second and then the panel output switches off while the backlight stays lit.
+# Every known-good integration (Waveshare esp_bsp, hello_35b, xiaozhi-esp32)
+# passes false to work around it. Instead of depending on the inversion, this
+# makes display_service emit DISPON (0x29) on the wire directly.
+#
+# The direct write is ON BY DEFAULT (it is disabled by
+# CONFIG_DISPLAY_SERVICE_SKIP_PANEL_DISPON_DIRECT, not enabled by a symbol),
+# so nothing needs to be set here. The line is kept commented out purely as
+# documentation of the escape hatch -- uncomment it only if the extra DISPON
+# ever causes trouble:
+# CONFIG_DISPLAY_SERVICE_SKIP_PANEL_DISPON_DIRECT=y
+#
+# Confirm at run time with the boot line:
+#   display_service: bring-up: dispon_direct=1 full_refresh=1 ...
+# If it reads dispon_direct=0 you are running an older build.
+
+# Pixel byte order needs no override: esp_lv_adapter already calls
+# lv_draw_sw_rgb565_swap() for PANEL_IF_OTHER panels when the LVGL colour
+# format is RGB565. Setting LV_COLOR_FORMAT_RGB565_SWAPPED here would bypass
+# that path, because the adapter's swap is guarded on == LV_COLOR_FORMAT_RGB565.
+
+# QSPI display streaming plus Wi-Fi TX sag the 3V3 rail. At the default
+# brownout level the chip can reset silently without ever printing
+# "Brownout detector was triggered", which looks exactly like a crash loop.
+# One notch down is what survived bring-up on this board.
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_6=y
