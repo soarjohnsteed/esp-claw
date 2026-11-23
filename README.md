@@ -1,4 +1,8 @@
 # esp-claw · Waveshare ESP32-S3-Touch-LCD-3.5B
+
+[English](#english) · [中文](#中文)
+
+---
 ## 太长不看
 
 乐鑫的 AXS15231B 驱动就是一坨__，导致任何项目都无法仅靠修改引脚定义完成适配。  
