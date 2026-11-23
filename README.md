@@ -1,4 +1,15 @@
 # esp-claw · Waveshare ESP32-S3-Touch-LCD-3.5B
+## 太长不看
+
+乐鑫的 AXS15231B 驱动就是一坨__，导致任何项目都无法仅靠修改引脚定义完成适配。因此，只能 Fork 项目并修改公用文件。
+
+~~单片机我是个外行，拿xiaozhi-esp32和微雪（waveshare）官方示例给AI参考，AI改了很久都弄不好。还好我搜索信息不是外行，找了同样使用AXS15231B的[JC3248W535 适配项目](https://github.com/straga/micropython_lcd/tree/master/device/JC3248W535)，提供给 AI 参考，AI才终于完成适配。噢，这句太啰唆了~~
+
+## TL;DR
+
+Espressif's AXS15231B driver is a piece of ____ , making it impossible to adapt boards simply by changing pin definitions. Forking the project and modifying shared source files is the only practical way.
+
+~~I'm not an MCU expert. AI struggled for quite a while when working from the xiaozhi-esp32 and official Waveshare examples. The breakthrough came after I found another AXS15231B-based board adaptation: [JC3248W535](https://github.com/straga/micropython_lcd/tree/master/device/JC3248W535).Oh, this sentence is too wordy.~~
 
 ## English
 
